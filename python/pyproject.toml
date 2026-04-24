@@ -8,9 +8,6 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
-[project.scripts]
-provision-office = "examples.office_template_07:main"
-
 [dependency-groups]
 dev = [
     "ruff>=0.11",

@@ -20,7 +20,7 @@ from bam_client import BAMClient
 
 BAM_URL = os.environ.get("BAM_URL", "https://bam.lab.corp")
 BAM_USER = os.environ.get("BAM_USER", "admin")
-BAM_PASS = os.environ.get("BAM_PASS", "admin")
+BAM_PASS = os.environ.get("BAM_PASS")
 
 TEMPLATE_FILE = os.path.join(os.path.dirname(__file__), "office-template.yaml")
 
@@ -156,6 +156,9 @@ def main():
         # Dry run doesn't need BAM connection
         provision_office(None, template, dry_run=True)
     else:
+        if not BAM_PASS:
+            print("Set BAM_PASS environment variable for live mode.")
+            sys.exit(1)
         with BAMClient(BAM_URL, BAM_USER, BAM_PASS, verify_ssl=False) as bam:
             provision_office(bam, template, dry_run=False)
 

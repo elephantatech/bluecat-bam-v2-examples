@@ -83,7 +83,7 @@ vlans:
 
 hardware:
   switches:
-    - { name: "sw-core01", mac: "AA:BB:CC:01:01:01", ip: "10.40.10.129", vlan: 60 }
+    - { name: "sw-core01", mac: "AA:BB:CC:01:01:01", ip: "10.40.10.132", vlan: 60 }
     - { name: "sw-acc01",  mac: "AA:BB:CC:01:02:01", ip: "10.40.10.130", vlan: 60 }
     - { name: "sw-acc02",  mac: "AA:BB:CC:01:02:02", ip: "10.40.10.131", vlan: 60 }
 

@@ -16,7 +16,10 @@ from bam_client import BAMClient
 
 BAM_URL = os.environ.get("BAM_URL", "https://bam.lab.corp")
 BAM_USER = os.environ.get("BAM_USER", "admin")
-BAM_PASS = os.environ.get("BAM_PASS", "admin")
+BAM_PASS = os.environ.get("BAM_PASS")
+if not BAM_PASS:
+    print("Set BAM_PASS environment variable.")
+    sys.exit(1)
 
 # Device to reserve
 MAC_ADDRESS = "BB:CC:DD:AA:AA:AA"

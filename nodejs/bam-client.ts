@@ -4,6 +4,11 @@
  * Simple TypeScript client for BAM RESTful v2 API.
  * Uses native fetch (Bun built-in).
  *
+ * NOTE: Endpoint paths verified against BAM v2 docs (25.1.0).
+ * Some paths may differ between BAM versions (9.5, 9.6, 25.1).
+ * If a call returns 404 or 400, check your BAM's Swagger UI
+ * at https://<BAM_IP>/api/docs for your version's exact paths.
+ *
  * Usage:
  *   import { BAMClient } from './bam-client';
  *   const bam = new BAMClient('https://bam.example.com', 'admin', 'password');
@@ -24,16 +29,23 @@ interface BAMCollection {
   count?: number;
 }
 
+function escapeFilterValue(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
 export class BAMClient {
   private apiUrl: string;
   private token: string | null = null;
+  private verifySsl: boolean;
 
   constructor(
     url: string,
     private username: string,
     private password: string,
+    options: { verifySsl?: boolean } = {},
   ) {
     this.apiUrl = `${url.replace(/\/$/, "")}/api/v2`;
+    this.verifySsl = options.verifySsl ?? false;
   }
 
   // --- Session ---
@@ -43,9 +55,9 @@ export class BAMClient {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: this.username, password: this.password }),
-      tls: { rejectUnauthorized: false },
+      tls: { rejectUnauthorized: this.verifySsl },
     } as RequestInit);
-    if (!resp.ok) throw new Error(`Login failed: ${resp.status}`);
+    if (!resp.ok) throw new Error(`Login failed: ${resp.status} ${await resp.text()}`);
     const data = await resp.json();
     this.token = data.apiToken;
     return data;
@@ -53,8 +65,17 @@ export class BAMClient {
 
   async logout() {
     if (!this.token) return;
-    await this.apiFetch("/sessions", { method: "DELETE" });
-    this.token = null;
+    try {
+      // v2 documented logout: PATCH /sessions/current with state change
+      await this.apiFetch("/sessions/current", {
+        method: "PATCH",
+        body: JSON.stringify({ state: "LOGGED_OUT" }),
+      });
+    } catch {
+      // Logout errors should not mask caller exceptions
+    } finally {
+      this.token = null;
+    }
   }
 
   // --- Low-level helpers ---
@@ -67,20 +88,24 @@ export class BAMClient {
         "Content-Type": "application/json",
         ...(options.headers as Record<string, string>),
       },
-      tls: { rejectUnauthorized: false },
+      tls: { rejectUnauthorized: this.verifySsl },
     } as RequestInit);
     if (!resp.ok) {
       const body = await resp.text();
       throw new Error(`BAM API ${resp.status}: ${body}`);
     }
-    if (resp.status === 204) return null;
-    return resp.json();
+    if (resp.status === 204 || resp.status === 205) return null;
+    const text = await resp.text();
+    return text ? JSON.parse(text) : null;
   }
 
   async get(path: string, params: Record<string, unknown> = {}): Promise<BAMCollection> {
-    const qs = new URLSearchParams(params as Record<string, string>).toString();
+    const entries = Object.entries(params).map(([k, v]) => [k, String(v)]);
+    const qs = new URLSearchParams(entries).toString();
     const url = qs ? `${path}?${qs}` : path;
-    return this.apiFetch(url);
+    const result = await this.apiFetch(url);
+    if (!result) throw new Error(`Unexpected empty response for GET ${path}`);
+    return result;
   }
 
   async post(path: string, data: unknown) {
@@ -101,9 +126,12 @@ export class BAMClient {
     return this.get("/configurations");
   }
 
-  async findConfiguration(name: string): Promise<BAMEntity | null> {
-    const r = await this.get("/configurations", { filter: `name:eq('${name}')` });
-    return r?.data?.[0] ?? null;
+  async findConfiguration(name: string): Promise<BAMEntity> {
+    const escaped = escapeFilterValue(name);
+    const r = await this.get("/configurations", { filter: `name:eq('${escaped}')` });
+    const item = r?.data?.[0];
+    if (!item) throw new Error(`Configuration '${name}' not found`);
+    return item;
   }
 
   // --- Views ---
@@ -112,11 +140,14 @@ export class BAMClient {
     return this.get(`/configurations/${configId}/views`);
   }
 
-  async findView(configId: number, name: string): Promise<BAMEntity | null> {
+  async findView(configId: number, name: string): Promise<BAMEntity> {
+    const escaped = escapeFilterValue(name);
     const r = await this.get(`/configurations/${configId}/views`, {
-      filter: `name:eq('${name}')`,
+      filter: `name:eq('${escaped}')`,
     });
-    return r?.data?.[0] ?? null;
+    const item = r?.data?.[0];
+    if (!item) throw new Error(`View '${name}' not found in configuration ${configId}`);
+    return item;
   }
 
   // --- Zones ---
@@ -125,8 +156,8 @@ export class BAMClient {
     return this.get(`/views/${viewId}/zones`);
   }
 
-  createZone(viewId: number, name: string) {
-    return this.post(`/views/${viewId}/zones`, { type: "Zone", name });
+  createZone(viewId: number, absoluteName: string) {
+    return this.post(`/views/${viewId}/zones`, { type: "Zone", absoluteName });
   }
 
   // --- Resource Records ---
@@ -163,7 +194,7 @@ export class BAMClient {
   }
 
   createBlock(configId: number, cidr: string, name?: string) {
-    const data: Record<string, string> = { range: cidr };
+    const data: Record<string, string> = { type: "IPv4Block", range: cidr };
     if (name) data.name = name;
     return this.post(`/configurations/${configId}/blocks`, data);
   }
@@ -173,7 +204,7 @@ export class BAMClient {
   }
 
   createNetwork(blockId: number, cidr: string, name?: string) {
-    const data: Record<string, string> = { range: cidr };
+    const data: Record<string, string> = { type: "IPv4Network", range: cidr };
     if (name) data.name = name;
     return this.post(`/blocks/${blockId}/networks`, data);
   }
@@ -191,6 +222,7 @@ export class BAMClient {
     return this.post(`/networks/${networkId}/addresses`, data);
   }
 
+  /** NOTE: May be GET on some BAM versions. Check /api/docs. */
   assignNextAvailableIp(
     networkId: number,
     opts: { mac?: string; name?: string; action?: string } = {},
@@ -203,8 +235,13 @@ export class BAMClient {
 
   // --- DHCP ---
 
+  /** NOTE: Some BAM versions use /ranges with different body format. Check /api/docs. */
   createDhcpRange(networkId: number, start: string, end: string) {
-    return this.post(`/networks/${networkId}/dhcpRanges`, { start, end });
+    return this.post(`/networks/${networkId}/ranges`, {
+      type: "DHCP4Range",
+      start,
+      end,
+    });
   }
 
   // --- Servers ---
@@ -213,18 +250,23 @@ export class BAMClient {
     return this.get(`/configurations/${configId}/servers`);
   }
 
-  deployServer(serverId: number, services = "DNS,DHCP") {
-    return this.post(`/servers/${serverId}/deploy`, { services });
+  /** NOTE: Some BAM versions use /deploy instead of /deployments. Check /api/docs. */
+  deployServer(serverId: number, services: string[] = ["DNS", "DHCP"]) {
+    return this.post(`/servers/${serverId}/deployments`, { services });
   }
 
   // --- Search ---
 
-  search(keyword: string, opts: { type?: string; limit?: number } = {}) {
+  /**
+   * Search by filtering configurations. The v2 API has no /search endpoint;
+   * use get() with filters on specific collections for targeted searches.
+   */
+  search(keyword: string, opts: { limit?: number } = {}) {
+    const escaped = escapeFilterValue(keyword);
     const params: Record<string, unknown> = {
-      filter: `keyword:contains('${keyword}')`,
+      filter: `name:contains('${escaped}')`,
       limit: opts.limit ?? 100,
     };
-    if (opts.type) params.type = opts.type;
-    return this.get("/search", params);
+    return this.get("/configurations", params);
   }
 }

@@ -292,11 +292,25 @@ See `research/02-opensource-ecosystem.md` for full details. Key findings:
 - **Go**: [`umich-vci/gobam`](https://github.com/umich-vci/gobam) and the [lego ACME client](https://github.com/go-acme/lego) have BlueCat providers.
 - **Terraform**: Official provider at [`bluecatlabs/terraform-provider-bluecat`](https://registry.terraform.io/providers/bluecatlabs/bluecat/latest).
 
+## API version compatibility
+
+The endpoint paths and request bodies in this project were verified against the BAM v2 API documentation (25.1.0). Some paths differ between BAM versions (9.5, 9.6, 25.1). If a call returns 404 or 400, check your BAM's Swagger UI for the exact paths your version supports.
+
+Endpoints that are known to vary between versions:
+
+| Operation | This repo uses | Some versions use |
+|---|---|---|
+| Logout | `PATCH /sessions/current` | `DELETE /sessions` |
+| Create zone | `absoluteName` field | `name` field |
+| DHCP range | `POST .../ranges` | `POST .../dhcpRanges` |
+| Deploy server | `POST .../deployments` | `POST .../deploy` |
+| Next available IP | `POST .../nextAvailableAddress` | `GET .../nextAvailableAddress` |
+
+The definitive source is always the Swagger UI on your BAM instance at `https://<BAM_IP>/api/docs` and the OpenAPI spec at `https://<BAM_IP>/api/openapi.json`. If something doesn't match, download the OpenAPI spec from your instance and adjust the client accordingly.
+
 ## No BAM instance?
 
 All examples work in **dry run mode** by default. The office template provisioner prints exactly what it would create without connecting to BAM. When you have access to a BAM instance, set the environment variables and use `DRY_RUN=false`.
-
-You can also explore the API interactively via the Swagger UI built into every BAM instance at `https://{BAM_IP}/api/docs`, or download the OpenAPI spec from `https://{BAM_IP}/api/openapi.json`.
 
 ## License
 

@@ -5,6 +5,12 @@ A simple, modern Python client for the BAM RESTful v2 API.
 This replaces the v1 REST/SOAP patterns from the original
 bluecatlabs/making-apis-work-for-you examples.
 
+NOTE: Endpoint paths and request bodies were verified against the
+BAM v2 API documentation (25.1.0). Some endpoints may differ
+between BAM versions (9.5, 9.6, 25.1). If a call returns 404
+or 400, check your BAM's Swagger UI at https://<BAM_IP>/api/docs
+for the exact paths and schemas your version supports.
+
 Usage:
     from bam_client import BAMClient
 
@@ -19,8 +25,10 @@ Requirements:
 import requests
 import urllib3
 
-# Suppress InsecureRequestWarning when verify=False is used in lab environments
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+def _escape_filter_value(value: str) -> str:
+    """Escape single quotes in BAM v2 filter values."""
+    return value.replace("'", "''")
 
 
 class BAMClient:
@@ -35,6 +43,8 @@ class BAMClient:
         self.token = None
         self.session = requests.Session()
         self.session.verify = self.verify
+        if not verify_ssl:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     # --- Session management ---
 
@@ -56,17 +66,29 @@ class BAMClient:
         return data
 
     def logout(self):
-        """End the API session."""
+        """End the API session via PATCH (v2 documented approach)."""
         if self.token:
-            self.session.delete(f"{self.api_url}/sessions")
-            self.token = None
+            try:
+                self.session.patch(
+                    f"{self.api_url}/sessions/current",
+                    json={"state": "LOGGED_OUT"},
+                )
+            except Exception:
+                pass
+            finally:
+                self.token = None
+
+    def close(self):
+        """Close the underlying HTTP session."""
+        self.logout()
+        self.session.close()
 
     def __enter__(self):
         self.login()
         return self
 
     def __exit__(self, *args):
-        self.logout()
+        self.close()
 
     # --- Low-level HTTP helpers ---
 
@@ -74,6 +96,23 @@ class BAMClient:
         resp = self.session.get(f"{self.api_url}{path}", params=params)
         resp.raise_for_status()
         return resp.json() if resp.content else None
+
+    def get_all(self, path: str, params: dict | None = None) -> list:
+        """Fetch all pages of a collection endpoint."""
+        params = dict(params or {})
+        results = []
+        offset = 0
+        limit = 100
+        while True:
+            params["offset"] = offset
+            params["limit"] = limit
+            resp = self.get(path, params=params)
+            items = resp.get("data", []) if resp else []
+            results.extend(items)
+            if len(items) < limit:
+                break
+            offset += limit
+        return results
 
     def post(self, path: str, data: dict | None = None):
         resp = self.session.post(f"{self.api_url}{path}", json=data)
@@ -110,10 +149,13 @@ class BAMClient:
         return self.get(f"/configurations/{config_id}")
 
     def find_configuration(self, name: str):
-        """Find a configuration by name."""
-        result = self.get("/configurations", params={"filter": f"name:eq('{name}')"})
+        """Find a configuration by name. Raises ValueError if not found."""
+        escaped = _escape_filter_value(name)
+        result = self.get("/configurations", params={"filter": f"name:eq('{escaped}')"})
         items = result.get("data", [])
-        return items[0] if items else None
+        if not items:
+            raise ValueError(f"Configuration '{name}' not found")
+        return items[0]
 
     # --- Views ---
 
@@ -122,12 +164,16 @@ class BAMClient:
         return self.get(f"/configurations/{config_id}/views")
 
     def find_view(self, config_id: int, name: str):
+        """Find a view by name. Raises ValueError if not found."""
+        escaped = _escape_filter_value(name)
         result = self.get(
             f"/configurations/{config_id}/views",
-            params={"filter": f"name:eq('{name}')"},
+            params={"filter": f"name:eq('{escaped}')"},
         )
         items = result.get("data", [])
-        return items[0] if items else None
+        if not items:
+            raise ValueError(f"View '{name}' not found in configuration {config_id}")
+        return items[0]
 
     # --- Zones ---
 
@@ -135,13 +181,13 @@ class BAMClient:
         """List zones under a view."""
         return self.get(f"/views/{view_id}/zones")
 
-    def create_zone(self, view_id: int, name: str, zone_type: str = "Zone"):
-        """Create a DNS zone."""
+    def create_zone(self, view_id: int, absolute_name: str, zone_type: str = "Zone"):
+        """Create a DNS zone. Use absoluteName for dotted names (e.g., 'office.example.com')."""
         return self.post(
             f"/views/{view_id}/zones",
             data={
                 "type": zone_type,
-                "name": name,
+                "absoluteName": absolute_name,
             },
         )
 
@@ -186,7 +232,7 @@ class BAMClient:
 
     def create_block(self, config_id: int, cidr: str, name: str | None = None):
         """Create an IPv4 block."""
-        data = {"range": cidr}
+        data: dict = {"type": "IPv4Block", "range": cidr}
         if name:
             data["name"] = name
         return self.post(f"/configurations/{config_id}/blocks", data=data)
@@ -199,7 +245,7 @@ class BAMClient:
 
     def create_network(self, block_id: int, cidr: str, name: str | None = None):
         """Create an IPv4 network."""
-        data = {"range": cidr}
+        data: dict = {"type": "IPv4Network", "range": cidr}
         if name:
             data["name"] = name
         return self.post(f"/blocks/{block_id}/networks", data=data)
@@ -219,7 +265,7 @@ class BAMClient:
         action: str = "MAKE_STATIC",
     ):
         """Assign an IP address."""
-        data = {
+        data: dict = {
             "address": address,
             "action": action,
         }
@@ -236,8 +282,12 @@ class BAMClient:
         name: str | None = None,
         action: str = "MAKE_DHCP_RESERVED",
     ):
-        """Assign the next available IP in a network."""
-        data = {"action": action}
+        """Get and assign the next available IP in a network.
+
+        NOTE: The v2 API may use GET for discovery and POST for assignment
+        depending on your BAM version. Check /api/docs on your instance.
+        """
+        data: dict = {"action": action}
         if mac:
             data["macAddress"] = mac
         if name:
@@ -247,10 +297,16 @@ class BAMClient:
     # --- DHCP Ranges ---
 
     def create_dhcp_range(self, network_id: int, start: str, end: str):
-        """Create a DHCP range (pool) in a network."""
+        """Create a DHCP range (pool) in a network.
+
+        NOTE: Some BAM versions use /ranges instead of /dhcpRanges, and
+        expect {range: "offset,size"} or {fromAddress, toAddress} instead
+        of {start, end}. Check /api/docs on your instance.
+        """
         return self.post(
-            f"/networks/{network_id}/dhcpRanges",
+            f"/networks/{network_id}/ranges",
             data={
+                "type": "DHCP4Range",
                 "start": start,
                 "end": end,
             },
@@ -258,25 +314,23 @@ class BAMClient:
 
     # --- Deployment Options ---
 
-    def add_dns_option(self, entity_id: int, option_name: str, value: str):
-        """Add a DNS deployment option."""
+    def add_dns_option(self, zone_id: int, option_name: str, value: str):
+        """Add a DNS deployment option to a zone."""
         return self.post(
-            "/deploymentOptions",
+            f"/zones/{zone_id}/deploymentOptions",
             data={
                 "type": "DNSDeploymentOption",
-                "parentId": entity_id,
                 "name": option_name,
                 "value": value,
             },
         )
 
-    def add_dhcp_option(self, entity_id: int, option_name: str, value: str):
-        """Add a DHCP client deployment option."""
+    def add_dhcp_option(self, network_id: int, option_name: str, value: str):
+        """Add a DHCP client deployment option to a network."""
         return self.post(
-            "/deploymentOptions",
+            f"/networks/{network_id}/deploymentOptions",
             data={
                 "type": "DHCPClientDeploymentOption",
-                "parentId": entity_id,
                 "name": option_name,
                 "value": value,
             },
@@ -288,12 +342,16 @@ class BAMClient:
         """List servers in a configuration."""
         return self.get(f"/configurations/{config_id}/servers")
 
-    def deploy_server(self, server_id: int, services: str = "DNS,DHCP"):
-        """Deploy configuration to a server."""
+    def deploy_server(self, server_id: int, services: list[str] | None = None):
+        """Deploy configuration to a server.
+
+        NOTE: Some BAM versions use /deployments instead of /deploy.
+        Check /api/docs on your instance.
+        """
         return self.post(
-            f"/servers/{server_id}/deploy",
+            f"/servers/{server_id}/deployments",
             data={
-                "services": services,
+                "services": services or ["DNS", "DHCP"],
             },
         )
 
@@ -304,8 +362,17 @@ class BAMClient:
     # --- Search ---
 
     def search(self, keyword: str, object_types: str | None = None, limit: int = 100):
-        """Search across BAM objects."""
-        params = {"filter": f"keyword:contains('{keyword}')", "limit": limit}
+        """Search by filtering on a collection endpoint.
+
+        The v2 API has no /search endpoint. This searches configurations
+        using the filter parameter. For more targeted searches, use
+        get() with filters on specific collection endpoints like
+        /zones, /resourceRecords, /networks, etc.
+        """
+        params: dict = {
+            "filter": f"name:contains('{_escape_filter_value(keyword)}')",
+            "limit": limit,
+        }
         if object_types:
             params["type"] = object_types
-        return self.get("/search", params=params)
+        return self.get("/configurations", params=params)

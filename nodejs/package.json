@@ -8,7 +8,9 @@
     "provision": "bun examples/04-office-template.ts"
   },
   "dependencies": {
-    "js-yaml": "^4.1.0",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
     "@types/js-yaml": "^4.0.9"
   }
 }

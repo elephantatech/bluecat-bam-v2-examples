@@ -19,7 +19,10 @@ from bam_client import BAMClient
 
 BAM_URL = os.environ.get("BAM_URL", "https://bam.lab.corp")
 BAM_USER = os.environ.get("BAM_USER", "admin")
-BAM_PASS = os.environ.get("BAM_PASS", "admin")
+BAM_PASS = os.environ.get("BAM_PASS")
+if not BAM_PASS:
+    print("Set BAM_PASS environment variable.")
+    sys.exit(1)
 
 CONFIG_NAME = "main"
 DEPLOY_SERVER = os.environ.get("DEPLOY_SERVER", "")  # set to server name to deploy
@@ -48,7 +51,7 @@ with BAMClient(BAM_URL, BAM_USER, BAM_PASS, verify_ssl=False) as bam:
             sys.exit(1)
 
         print(f"\nDeploying to {target['name']}...")
-        bam.deploy_server(target["id"], services="DNS,DHCP")
+        bam.deploy_server(target["id"], services=["DNS", "DHCP"])
 
         # Poll deployment status
         for _ in range(60):
