@@ -1,0 +1,28 @@
+[project]
+name = "bluecat-bam-v2-examples"
+version = "0.1.0"
+description = "BlueCat Address Manager v2 API examples - modernized from bluecatlabs/making-apis-work-for-you"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+provision-office = "examples.office_template_07:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11",
+    "pytest>=8.0",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"

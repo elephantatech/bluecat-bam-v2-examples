@@ -1,0 +1,109 @@
+# Office Template: Define a new office location
+# Run with: python 07_office_template.py
+
+site:
+  code: "chi1"
+  name: "Chicago Office 1"
+
+network:
+  supernet: "10.40.0.0/20"
+  domain: "chi1.corp.example.com"
+  dns_servers: ["10.0.0.10", "10.0.0.11"]
+  ntp_servers: ["10.0.0.20"]
+  bam_config: "main"
+  bam_view: "default"
+
+vlans:
+  - id: 10
+    name: "Corp-Data"
+    subnet: "10.40.0.0/23"
+    gateway: "10.40.0.1"
+    dhcp:
+      type: "dynamic"
+      range_start: "10.40.0.100"
+      range_end: "10.40.1.254"
+      lease_time: "8h"
+    ddns: true
+
+  - id: 20
+    name: "Corp-Voice"
+    subnet: "10.40.2.0/24"
+    gateway: "10.40.2.1"
+    dhcp:
+      type: "reservation"
+      lease_time: "12h"
+    ddns: true
+
+  - id: 30
+    name: "Corp-WiFi"
+    subnet: "10.40.4.0/22"
+    gateway: "10.40.4.1"
+    dhcp:
+      type: "dynamic"
+      range_start: "10.40.4.50"
+      range_end: "10.40.7.254"
+      lease_time: "4h"
+    ddns: true
+    wifi:
+      ssid: "CorpNet-CHI1"
+      security: "WPA3-Enterprise"
+
+  - id: 40
+    name: "Guest-WiFi"
+    subnet: "10.40.8.0/23"
+    gateway: "10.40.8.1"
+    dhcp:
+      type: "dynamic"
+      range_start: "10.40.8.10"
+      range_end: "10.40.9.254"
+      lease_time: "2h"
+    ddns: false
+    wifi:
+      ssid: "Guest-CHI1"
+      security: "WPA3-Personal"
+      captive_portal: true
+
+  - id: 60
+    name: "Mgmt"
+    subnet: "10.40.10.128/26"
+    gateway: "10.40.10.129"
+    dhcp:
+      type: "reservation"
+      lease_time: "24h"
+    ddns: true
+
+  - id: 70
+    name: "IoT-BMS"
+    subnet: "10.40.11.0/24"
+    gateway: "10.40.11.1"
+    dhcp:
+      type: "reservation"
+      lease_time: "24h"
+    ddns: true
+
+hardware:
+  switches:
+    - { name: "sw-core01", mac: "AA:BB:CC:01:01:01", ip: "10.40.10.129", vlan: 60 }
+    - { name: "sw-acc01",  mac: "AA:BB:CC:01:02:01", ip: "10.40.10.130", vlan: 60 }
+    - { name: "sw-acc02",  mac: "AA:BB:CC:01:02:02", ip: "10.40.10.131", vlan: 60 }
+
+  wireless_aps:
+    - { name: "ap-1f-01", mac: "AA:BB:CC:02:01:01", ip: "10.40.10.140", vlan: 60 }
+    - { name: "ap-1f-02", mac: "AA:BB:CC:02:01:02", ip: "10.40.10.141", vlan: 60 }
+    - { name: "ap-2f-01", mac: "AA:BB:CC:02:02:01", ip: "10.40.10.142", vlan: 60 }
+    - { name: "ap-2f-02", mac: "AA:BB:CC:02:02:02", ip: "10.40.10.143", vlan: 60 }
+
+  printers:
+    - { name: "pr-1f-01", mac: "AA:BB:CC:03:01:01", ip: "10.40.0.20", vlan: 10 }
+    - { name: "pr-2f-01", mac: "AA:BB:CC:03:02:01", ip: "10.40.0.21", vlan: 10 }
+
+  cameras:
+    - { name: "cam-lobby",    mac: "AA:BB:CC:05:01:01", ip: "10.40.11.10", vlan: 70 }
+    - { name: "cam-entrance", mac: "AA:BB:CC:05:01:02", ip: "10.40.11.11", vlan: 70 }
+
+  badge_readers:
+    - { name: "badge-1f-main",  mac: "AA:BB:CC:06:01:01", ip: "10.40.11.30", vlan: 70 }
+    - { name: "badge-2f-stair", mac: "AA:BB:CC:06:02:01", ip: "10.40.11.31", vlan: 70 }
+
+  firewall:
+    - { name: "fw01", ip: "10.40.10.254" }  # Static config, no DHCP

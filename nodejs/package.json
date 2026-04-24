@@ -1,0 +1,14 @@
+{
+  "name": "bluecat-bam-v2-examples",
+  "version": "0.1.0",
+  "scripts": {
+    "connect": "bun examples/01-connect.ts",
+    "add-host": "bun examples/02-add-host.ts",
+    "dhcp-reserve": "bun examples/03-dhcp-reservation.ts",
+    "provision": "bun examples/04-office-template.ts"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "@types/js-yaml": "^4.0.9"
+  }
+}
